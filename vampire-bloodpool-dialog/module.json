@@ -1,0 +1,21 @@
+{
+  "id": "vampire-bloodpool-dialog",
+  "title": "Vampire: Blood Pool in Discipline Roll",
+  "description": "Adds Blood Pool spending to Vampire Discipline rolls and displays Appearance instead of Attractiveness on Vampire sheets.",
+  "version": "1.0.1",
+  "authors": [
+    {
+      "name": "Codex for the Rostov World of Darkness campaign"
+    }
+  ],
+  "compatibility": {
+    "minimum": "12",
+    "verified": "13"
+  },
+  "esmodules": [
+    "scripts/bloodpool-dialog.js"
+  ],
+  "styles": [
+    "styles/bloodpool-dialog.css"
+  ]
+}

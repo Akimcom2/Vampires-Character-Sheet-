@@ -1,0 +1,95 @@
+.vampire-blood-spend {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  width: auto;
+  min-height: 42px;
+  box-sizing: border-box;
+  margin: 0.3rem 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--color-border-light-primary, #8f1d2c);
+  border-radius: 6px;
+  background: rgb(25 0 0 / 22%);
+  position: relative;
+  z-index: 20;
+  overflow: visible;
+  pointer-events: auto;
+}
+
+.vampire-blood-check,
+.vampire-blood-cost {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  position: relative;
+  z-index: 21;
+  pointer-events: auto;
+}
+
+.vampire-blood-check {
+  min-height: 28px;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+
+.vampire-blood-box {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 1px solid #c9c9c9;
+  border-radius: 2px;
+  background: #fff;
+  color: #5e0712;
+}
+
+.vampire-blood-check[aria-checked="true"] .vampire-blood-box::after {
+  content: "✓";
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.vampire-blood-check:focus-visible .vampire-blood-box {
+  outline: 2px solid var(--color-border-highlight, #a82838);
+  outline-offset: 2px;
+}
+
+.vampire-blood-cost input {
+  width: 3.5rem !important;
+  min-width: 3.5rem;
+  height: 1.8rem;
+  text-align: center;
+}
+
+.vampire-blood-current {
+  white-space: nowrap;
+  opacity: 0.85;
+  font-size: 0.9em;
+}
+
+.vampire-blood-spend input,
+.vampire-blood-spend label,
+.vampire-blood-spend span {
+  pointer-events: auto;
+}
+
+.vampire-blood-spend.is-active {
+  background: rgb(143 29 44 / 20%);
+  box-shadow: inset 0 0 0 1px rgb(180 45 60 / 25%);
+}
+
+@media (max-width: 620px) {
+  .vampire-blood-spend {
+    grid-template-columns: 1fr auto;
+  }
+
+  .vampire-blood-current {
+    grid-column: 1 / -1;
+  }
+}
