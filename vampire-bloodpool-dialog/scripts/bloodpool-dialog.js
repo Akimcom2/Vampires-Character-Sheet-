@@ -230,15 +230,20 @@ function legacyHealthLabel(actor) {
 
 function correctLegacyVampireHealth(root, actor) {
   if (String(actor?.type ?? "").toLowerCase() !== "vampire") return;
-  const heading = [...root.querySelectorAll(".sheet-headline, h1, h2, h3, h4")].find(element => {
+  const headings = [...root.querySelectorAll(".sheet-headline, h1, h2, h3, h4")].filter(element => {
     const text = String(element.textContent ?? "").replace(/\s+/g, " ").trim();
     return /^(здоровье|health)$/i.test(text);
   });
-  const container = heading?.nextElementSibling;
-  const label = container?.querySelector?.(":scope > div") ?? container?.firstElementChild;
-  if (!label) return;
-  label.textContent = legacyHealthLabel(actor);
-  label.dataset.vampireHealthCorrected = "true";
+
+  // The legacy Vampire sheet renders the same health partial independently
+  // on Main and Combat. Correct every copy, including a currently hidden tab.
+  for (const heading of headings) {
+    const container = heading.nextElementSibling;
+    const label = container?.querySelector?.(":scope > div") ?? container?.firstElementChild;
+    if (!label) continue;
+    label.textContent = legacyHealthLabel(actor);
+    label.dataset.vampireHealthCorrected = "true";
+  }
 }
 
 function ensureVampireEffectPlus(root, actor) {
@@ -423,6 +428,26 @@ function difficultyContainer(root) {
   return null;
 }
 
+function selectedDifficulty(root) {
+  const selected = root.querySelector([
+    ".dialog-difficulty-button.active",
+    ".dialog-difficulty-button[aria-pressed='true']",
+    "[data-difficulty].active",
+    "input[name*='difficulty' i]:checked",
+    "select[name*='difficulty' i]"
+  ].join(", "));
+  if (!selected) return null;
+
+  const value = Number.parseInt(
+    selected.value
+      ?? selected.dataset?.difficulty
+      ?? selected.dataset?.index
+      ?? selected.textContent,
+    10
+  );
+  return Number.isInteger(value) && value >= 2 && value <= 10 ? value : null;
+}
+
 function insertControls(root, willpower, current, defaultCost = 1) {
   const row = document.createElement("div");
   row.className = "vampire-blood-spend";
@@ -526,6 +551,17 @@ function enhance(app, html) {
 
     event.preventDefault();
     event.stopImmediatePropagation();
+
+    // WoD20 represents "Dont Show" as difficulty -1 and aborts in its own
+    // handler. Validate first so an aborted roll can never consume Blood.
+    if (selectedDifficulty(root) === null) {
+      const message = game.i18n.localize("wod.dialog.missingdifficulty");
+      return ui.notifications.warn(
+        message && message !== "wod.dialog.missingdifficulty"
+          ? message
+          : "Выберите сложность броска. Кровь не потрачена."
+      );
+    }
 
     const live = bloodData(actor);
     const amount = Number.parseInt(cost.value, 10);
