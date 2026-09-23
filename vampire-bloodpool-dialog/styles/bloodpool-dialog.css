@@ -84,6 +84,51 @@
   box-shadow: inset 0 0 0 1px rgb(180 45 60 / 25%);
 }
 
+.wod20 button.vampire-effect-plus {
+  position: absolute !important;
+  right: 1rem !important;
+  bottom: 1rem !important;
+  z-index: 100 !important;
+  display: grid;
+  place-items: center;
+  width: 38px !important;
+  height: 38px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid #0b6d12 !important;
+  border-radius: 6px;
+  background: #079315 !important;
+  background-color: #079315 !important;
+  background-image: none !important;
+  color: #111 !important;
+  font-family: Arial, sans-serif !important;
+  font-size: 32px !important;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto !important;
+}
+
+.wod20 button.vampire-effect-plus:hover,
+.wod20 button.vampire-effect-plus:focus-visible {
+  background: #0caf1d !important;
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 35%);
+}
+
+.vampire-effect-plus[hidden] {
+  display: none !important;
+}
+
+.wod20 button.vampire-effect-plus > span {
+  display: block;
+  transform: translateY(-1px);
+  line-height: 1;
+}
+
+.wod20 .vampire-effect-plus-host {
+  position: relative !important;
+}
+
 @media (max-width: 620px) {
   .vampire-blood-spend {
     grid-template-columns: 1fr auto;

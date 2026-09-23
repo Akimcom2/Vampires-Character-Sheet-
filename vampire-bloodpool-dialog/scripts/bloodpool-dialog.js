@@ -4,7 +4,17 @@ const BLOOD_PATHS = [
   "system.advantages.bloodpool.value"
 ];
 const DISPLAY_RENAMES = new Map([
-  ["Привлекательность", "Внешность"]
+  ["Привлекательность", "Внешность"],
+  ["Совесть", "Убежденность"],
+  ["Самоконтроль", "Инстинкты"]
+]);
+const VAMPIRE_POWER_TYPES = new Set([
+  "wod.types.discipline",
+  "wod.types.disciplinepower",
+  "wod.types.disciplinepath",
+  "wod.types.disciplinepathpower",
+  "wod.types.combination",
+  "wod.types.ritual"
 ]);
 
 function elementFrom(html) {
@@ -24,24 +34,138 @@ function bloodData(actor) {
 
 function isVampireActor(actor) {
   if (!actor) return false;
-  return String(actor.type ?? "").toLowerCase() === "vampire";
+  const actorType = String(actor.type ?? "").toLowerCase();
+  if (actorType === "vampire") return true;
+  if (actorType !== "pc") return false;
+
+  // WoD20's universal PC sheet can represent any game line. Treat it as a
+  // Vampire only when its Discipline section is enabled or it actually owns
+  // Vampire Discipline items.
+  if (actor.system?.settings?.powers?.hasdisciplines === true) return true;
+  return Array.from(actor.items ?? []).some(item =>
+    VAMPIRE_POWER_TYPES.has(String(item?.system?.type ?? "").toLowerCase())
+  );
 }
 
-function actorFrom(app) {
-  const candidates = [
+function validVampireActor(candidate) {
+  return candidate?.documentName === "Actor" && isVampireActor(candidate) && bloodData(candidate);
+}
+
+function actorFrom(app, root = null) {
+  // Different WoD20/Foundry combinations expose the owner of a rolled Item in
+  // different places. Follow the known parent/actor/document links instead of
+  // relying only on app.actor.
+  const seeds = [
+    game.actors?.get?.(root?.dataset?.vampireBloodActorId),
+    game.actors?.get?.(root?.closest?.(".window-app, .application")?.dataset?.vampireBloodActorId),
     app?.actor,
-    app?.item?.actor,
-    app?.document?.actor,
-    app?.object?.actor,
+    app?.item,
+    app?.document,
+    app?.object,
     app?.options?.actor,
-    app?.options?.item?.actor,
-    canvas?.tokens?.controlled?.[0]?.actor,
+    app?.options?.item,
+    app?.options?.document,
+    app?.data?.actor,
+    app?.data?.item,
+    canvas?.tokens?.controlled?.[0],
     game.user?.character
   ];
+  const queue = seeds.filter(Boolean);
+  const visited = new Set();
 
-  return candidates.find(candidate =>
-    candidate?.documentName === "Actor" && isVampireActor(candidate) && bloodData(candidate)
-  );
+  while (queue.length) {
+    const candidate = queue.shift();
+    if (!candidate || visited.has(candidate)) continue;
+    visited.add(candidate);
+    if (validVampireActor(candidate)) return candidate;
+
+    for (const linked of [
+      candidate.actor,
+      candidate.parent,
+      candidate.document,
+      candidate.object,
+      candidate.item,
+      candidate.token?.actor
+    ]) {
+      if (linked && !visited.has(linked)) queue.push(linked);
+    }
+  }
+
+  // Some legacy WoD20 roll dialogs contain no document reference at all, but
+  // their window title is the Actor name (as in the player's screenshot).
+  const windowRoot = root?.closest?.(".window-app, .application") ?? root;
+  const visibleTitles = [
+    app?.title,
+    windowRoot?.querySelector?.(".window-title")?.textContent,
+    windowRoot?.querySelector?.("header h4, header h3")?.textContent
+  ].filter(value => typeof value === "string" && value.trim());
+  const vampires = game.actors?.filter?.(validVampireActor) ?? [];
+  for (const title of visibleTitles) {
+    const normalized = title.trim().toLocaleLowerCase("ru-RU");
+    const named = vampires.find(actor => {
+      const name = String(actor.name ?? "").trim().toLocaleLowerCase("ru-RU");
+      return name && (normalized === name || normalized.startsWith(`${name} `));
+    });
+    if (named) return named;
+  }
+
+  // Player accounts commonly own one Vampire without assigning it as their
+  // Foundry character. That is an unambiguous and safe final fallback.
+  if (!game.user?.isGM) {
+    const owned = vampires.filter(actor => actor.isOwner);
+    if (owned.length === 1) return owned[0];
+  }
+  return null;
+}
+
+const RUSSIAN_NUMBERS = new Map([
+  ["ноль", 0], ["один", 1], ["одна", 1], ["одно", 1],
+  ["два", 2], ["две", 2], ["три", 3], ["четыре", 4],
+  ["пять", 5], ["шесть", 6], ["семь", 7], ["восемь", 8],
+  ["девять", 9], ["десять", 10]
+]);
+
+function parsedNumber(value) {
+  const normalized = String(value ?? "").trim().toLocaleLowerCase("ru-RU");
+  if (/^\d+$/.test(normalized)) return Number.parseInt(normalized, 10);
+  return RUSSIAN_NUMBERS.get(normalized) ?? null;
+}
+
+function bloodCostFromText(text) {
+  const source = String(text ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("ru-RU");
+  const number = "(\\d+|ноль|один|одна|одно|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять)";
+  const unit = "(?:пункт(?:а|ов)?|очк(?:о|а|ов))";
+  const patterns = [
+    new RegExp(`(?:цена|стоимость|стоит|обходится|требует|затрат(?:а|ить|ив)|потрат(?:ить|ив|ьте)|расход(?:уется|овать))\\s*(?:в|составляет|равна?)?\\s*[:—-]?\\s*${number}\\s+${unit}\\s+крови`, "iu"),
+    new RegExp(`${number}\\s+${unit}\\s+крови[^.!?;]{0,35}?(?:цена|стоимость|стоит|затрат|потрат|расход)`, "iu")
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    const value = parsedNumber(match?.[1]);
+    if (Number.isInteger(value) && value > 0) return value;
+  }
+
+  // Phrases without an explicit numeral always mean one point.
+  if (/(?:потратив|потратить|затратив|затратить|расходуется|цена|стоимость|стоит)[^.!?;:]{0,45}?(?:пункт|очко)\s+крови/iu.test(source)) return 1;
+  return 1;
+}
+
+function disciplineText(app, root) {
+  const candidates = [
+    app?.object?.system?.description,
+    app?.object?.system?.system,
+    app?.item?.system?.description,
+    app?.item?.system?.system,
+    app?.document?.system?.description,
+    app?.document?.system?.system,
+    root?.textContent
+  ];
+  return candidates.filter(value => typeof value === "string").join(" ");
 }
 
 function renamedText(value) {
@@ -53,8 +177,8 @@ function renamedText(value) {
   return result;
 }
 
-function correctVampireLabels(app, root) {
-  const actor = actorFrom(app);
+function correctVampireLabels(app, root, suppliedActor = null) {
+  const actor = suppliedActor ?? actorFrom(app, root);
   const rootText = root.textContent ?? "";
   const isRoll = /Пул\s+костей/i.test(rootText) && /(?:Бросок|Закрыть|Roll|Close)/i.test(rootText);
   const isVampire = Boolean(actor)
@@ -82,6 +206,137 @@ function correctVampireLabels(app, root) {
   }
 }
 
+function numericDamage(actor) {
+  const damage = actor?.system?.health?.damage ?? {};
+  return ["bashing", "lethal", "aggravated"].reduce((total, type) => {
+    const value = Number(damage[type]);
+    return total + (Number.isFinite(value) ? value : 0);
+  }, 0);
+}
+
+function legacyHealthLabel(actor) {
+  let remaining = numericDamage(actor);
+  if (remaining <= 0) return game.i18n.localize("wod.health.uninjured");
+
+  for (const level of ["bruised", "hurt", "injured", "wounded", "mauled", "crippled"]) {
+    const data = actor?.system?.health?.[level];
+    const boxes = Number(data?.total);
+    if (!Number.isFinite(boxes) || boxes <= 0) continue;
+    remaining -= boxes;
+    if (remaining <= 0) return game.i18n.localize(data?.label ?? `wod.health.${level}`);
+  }
+  return game.i18n.localize("wod.health.incapacitated");
+}
+
+function correctLegacyVampireHealth(root, actor) {
+  if (String(actor?.type ?? "").toLowerCase() !== "vampire") return;
+  const heading = [...root.querySelectorAll(".sheet-headline, h1, h2, h3, h4")].find(element => {
+    const text = String(element.textContent ?? "").replace(/\s+/g, " ").trim();
+    return /^(здоровье|health)$/i.test(text);
+  });
+  const container = heading?.nextElementSibling;
+  const label = container?.querySelector?.(":scope > div") ?? container?.firstElementChild;
+  if (!label) return;
+  label.textContent = legacyHealthLabel(actor);
+  label.dataset.vampireHealthCorrected = "true";
+}
+
+function ensureVampireEffectPlus(root, actor) {
+  if (String(actor?.type ?? "").toLowerCase() !== "vampire" || !actor.isOwner) return;
+
+  const effectTab = root.querySelector('.tab[data-tab="effect"], .sheet-inner-area[data-tab="effect"]');
+  if (!effectTab) return;
+
+  // The Effects tab itself in the legacy Vampire sheet collapses to the height
+  // of its table header when it has no rows.  Anchoring the + to that element
+  // therefore puts the button in the top-right corner.  Instead, anchor the
+  // button to the full sheet content (same visual area used by the PC sheet)
+  // and only show it while the Effects tab is actually visible.
+  const windowRoot = root.closest?.(".window-app, .application") ?? root;
+  const host = windowRoot.querySelector?.(":scope > .window-content")
+    ?? windowRoot.querySelector?.(".window-content")
+    ?? root;
+  host.classList.add("vampire-effect-plus-host");
+
+  let plus = windowRoot.querySelector?.('.vampire-effect-plus');
+  if (plus && plus.parentElement !== host) plus.remove();
+  plus = host.querySelector?.(':scope > .vampire-effect-plus');
+
+  if (!plus) {
+    plus = document.createElement("button");
+    plus.type = "button";
+    plus.className = "vampire-effect-plus";
+    plus.dataset.origin = "effect";
+    plus.title = game.i18n.localize("wod.labels.add.item");
+    plus.setAttribute("aria-label", game.i18n.localize("wod.labels.add.item"));
+    plus.innerHTML = '<span aria-hidden="true">+</span>';
+
+    const createEffect = async event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      try {
+        const created = await actor.createEmbeddedDocuments("Item", [{
+          name: game.i18n.localize("wod.labels.new.bonus"),
+          type: "Bonus",
+          system: {
+            label: game.i18n.localize("wod.labels.new.bonus"),
+            isvisible: true,
+            isremovable: true,
+            settings: { isvisible: true, isremovable: true }
+          }
+        }]);
+        const bonus = created?.[0];
+        if (bonus?.sheet?.render) bonus.sheet.render(true);
+      } catch (error) {
+        console.error(`${MODULE_ID} | Effect creation failed`, error);
+        ui.notifications.error("Не удалось создать эффект.");
+      }
+    };
+
+    plus.addEventListener("click", createEffect, true);
+    plus.addEventListener("pointerdown", event => event.stopImmediatePropagation(), true);
+    host.append(plus);
+  }
+
+  const syncVisibility = () => {
+    if (!plus.isConnected || !effectTab.isConnected) return;
+    const style = getComputedStyle(effectTab);
+    const visible = !effectTab.hidden
+      && effectTab.getAttribute("aria-hidden") !== "true"
+      && style.display !== "none"
+      && style.visibility !== "hidden"
+      && effectTab.getClientRects().length > 0;
+    plus.hidden = !visible;
+  };
+
+  // Rebind when a sheet re-render replaces the tab element but leaves the
+  // window shell alive.
+  if (plus._vampireEffectTab !== effectTab) {
+    plus._vampireEffectObserver?.disconnect?.();
+    const observer = new MutationObserver(syncVisibility);
+    observer.observe(effectTab, {
+      attributes: true,
+      attributeFilter: ["class", "style", "hidden", "aria-hidden"]
+    });
+    if (effectTab.parentElement) {
+      observer.observe(effectTab.parentElement, {
+        attributes: true,
+        childList: true,
+        subtree: false
+      });
+    }
+    plus._vampireEffectObserver = observer;
+    plus._vampireEffectTab = effectTab;
+  }
+
+  // WoD20 changes tabs on click and then mutates classes/display.  The observer
+  // handles that; these two frames also cover versions that toggle visibility
+  // without touching an observed attribute on the tab itself.
+  syncVisibility();
+  requestAnimationFrame(syncVisibility);
+  setTimeout(syncVisibility, 0);
+}
+
 function willpowerCheckbox(root) {
   const direct = root.querySelector(
     'input[type="checkbox"][name*="willpower" i], input[type="checkbox"][id*="willpower" i], input[type="checkbox"][class*="willpower" i]'
@@ -105,11 +360,35 @@ function hasSectionHeading(root, pattern) {
   });
 }
 
-function isDisciplineRoll(root, actor) {
+function isVampirePowerRoll(app, root, actor) {
+  const objectType = String(app?.object?.type ?? app?.item?.system?.type ?? "").toLowerCase();
+  if (VAMPIRE_POWER_TYPES.has(objectType)) return true;
+
+  const itemId = app?.object?._id ?? app?.item?.id ?? app?.document?.id;
+  const embeddedItem = itemId ? actor?.items?.get?.(itemId) : null;
+  const embeddedType = String(embeddedItem?.system?.type ?? "").toLowerCase();
+  if (VAMPIRE_POWER_TYPES.has(embeddedType)) return true;
+
+  const sheetType = String(app?.object?.sheettype ?? app?.options?.sheettype ?? "").toLowerCase();
+  if (sheetType === "vampiredialog") return true;
+
+  return root.matches?.(".vampireDialog, .vampiredialog")
+    || Boolean(root.querySelector?.("form.vampireDialog, form.vampiredialog"))
+    || Boolean(root.closest?.(".vampireDialog, .vampiredialog"));
+}
+
+function isDisciplineRoll(app, root, actor) {
   if (!actor || !bloodData(actor)) return false;
   const hasDescription = hasSectionHeading(root, /^(описание|description)$/i);
   const hasSystem = hasSectionHeading(root, /^(система|system)$/i);
-  return hasDescription && hasSystem;
+  if (!hasDescription || !hasSystem) return false;
+
+  // Legacy Vampire actors used this same full dialog before all metadata was
+  // consistently exposed. Preserve their established behavior. Universal PC
+  // actors must additionally carry a Vampire-power marker, preventing Blood
+  // controls from appearing in Arcanoi and other enabled power families.
+  if (String(actor.type ?? "").toLowerCase() === "vampire") return true;
+  return isVampirePowerRoll(app, root, actor);
 }
 
 function rollButton(root) {
@@ -144,17 +423,17 @@ function difficultyContainer(root) {
   return null;
 }
 
-function insertControls(root, willpower, current) {
+function insertControls(root, willpower, current, defaultCost = 1) {
   const row = document.createElement("div");
   row.className = "vampire-blood-spend";
   row.innerHTML = `
-    <div class="vampire-blood-check" data-blood-use role="checkbox" aria-checked="false" tabindex="0">
+    <div class="vampire-blood-check" data-blood-use role="checkbox" aria-checked="true" tabindex="0">
       <span class="vampire-blood-box" aria-hidden="true"></span>
       <span>Использовать Запас крови</span>
     </div>
     <label class="vampire-blood-cost">
       <span>Стоимость</span>
-      <input type="number" data-blood-cost value="1" min="1" max="${Math.max(1, current)}" step="1">
+      <input type="number" data-blood-cost value="${defaultCost}" min="1" max="${Math.max(1, current, defaultCost)}" step="1">
     </label>
     <span class="vampire-blood-current" title="Текущий Запас крови">Доступно: ${current}</span>
   `;
@@ -179,13 +458,14 @@ function insertControls(root, willpower, current) {
 
   const toggle = row.querySelector("[data-blood-use]");
   const cost = row.querySelector("[data-blood-cost]");
-  toggle.checked = false;
+  toggle.checked = true;
 
   const setChecked = checked => {
     toggle.checked = Boolean(checked);
     toggle.setAttribute("aria-checked", String(toggle.checked));
     row.classList.toggle("is-active", toggle.checked);
   };
+  setChecked(true);
 
   toggle.addEventListener("click", event => {
     event.preventDefault();
@@ -210,18 +490,28 @@ function enhance(app, html) {
   const root = elementFrom(html) ?? app?.element?.[0] ?? app?.element;
   if (!(root instanceof HTMLElement)) return;
 
-  correctVampireLabels(app, root);
+  const actor = actorFrom(app, root);
+  if (actor) {
+    root.dataset.vampireBloodActorId = actor.id;
+    const windowRoot = root.closest?.(".window-app, .application");
+    if (windowRoot) windowRoot.dataset.vampireBloodActorId = actor.id;
+    correctVampireLabels(app, root, actor);
+    correctLegacyVampireHealth(root, actor);
+    ensureVampireEffectPlus(root, actor);
+  } else {
+    correctVampireLabels(app, root);
+  }
   if (root.dataset.vampireBloodReady === "true") return;
 
-  const actor = actorFrom(app);
-  if (!isDisciplineRoll(root, actor)) return;
+  if (!isDisciplineRoll(app, root, actor)) return;
 
   const willpower = willpowerCheckbox(root);
   const button = rollButton(root);
   const resource = actor && bloodData(actor);
   if (!willpower || !button || !resource) return;
 
-  const { row, toggle, cost } = insertControls(root, willpower, resource.value);
+  const defaultCost = bloodCostFromText(disciplineText(app, root));
+  const { row, toggle, cost } = insertControls(root, willpower, resource.value, defaultCost);
 
   requestAnimationFrame(() => {
     try {
@@ -273,9 +563,14 @@ Hooks.once("ready", () => {
   const correctOpenSheets = () => {
     queued = false;
     for (const root of document.querySelectorAll(".window-app, .application")) {
-      if (/Вампир(?:ы)?:\s*Маскарад(?:а)?|Vampire(?:s)?:\s*The Masquerade/i.test(root.textContent ?? "")) {
-        correctVampireLabels(null, root);
-      }
+      const actor = actorFrom(null, root);
+      const isVampireWindow = Boolean(actor)
+        || /Вампир(?:ы)?:\s*Маскарад(?:а)?|Vampire(?:s)?:\s*The Masquerade/i.test(root.textContent ?? "");
+      if (!isVampireWindow) continue;
+      if (actor) root.dataset.vampireBloodActorId = actor.id;
+      correctVampireLabels(null, root, actor);
+      correctLegacyVampireHealth(root, actor);
+      ensureVampireEffectPlus(root, actor);
     }
   };
   const scheduleCorrection = () => {
