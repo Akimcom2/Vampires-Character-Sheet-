@@ -24,10 +24,32 @@ function elementFrom(html) {
 }
 
 function bloodData(actor) {
+  // The universal PC sheet stores advantages as embedded Items, unlike the
+  // legacy Vampire sheet which keeps the pool under actor.system.advantages.
+  if (String(actor?.type ?? "").toLowerCase() === "pc") {
+    const poolItem = Array.from(actor.items ?? []).find(item =>
+      String(item?.type ?? "").toLowerCase() === "advantage"
+      && String(item?.system?.id ?? "").toLowerCase() === "bloodpool"
+    );
+    const value = Number(poolItem?.system?.temporary);
+    if (poolItem && Number.isFinite(value)) {
+      return {
+        value,
+        update: next => poolItem.update({ "system.temporary": next })
+      };
+    }
+  }
+
   for (const path of BLOOD_PATHS) {
     const raw = foundry.utils.getProperty(actor, path);
     const value = Number(raw);
-    if (Number.isFinite(value)) return { path, value };
+    if (Number.isFinite(value)) {
+      return {
+        path,
+        value,
+        update: next => actor.update({ [path]: next })
+      };
+    }
   }
   return null;
 }
@@ -578,7 +600,7 @@ function enhance(app, html) {
 
     button.disabled = true;
     try {
-      await actor.update({ [live.path]: live.value - amount });
+      await live.update(live.value - amount);
       row.querySelector(".vampire-blood-current").textContent = `Доступно: ${live.value - amount}`;
       ui.notifications.info(`Запас крови: −${amount} (${live.value - amount} осталось)`);
 
