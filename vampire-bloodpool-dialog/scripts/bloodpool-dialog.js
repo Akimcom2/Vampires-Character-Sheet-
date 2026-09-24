@@ -229,14 +229,17 @@ function legacyHealthLabel(actor) {
 }
 
 function correctLegacyVampireHealth(root, actor) {
-  if (String(actor?.type ?? "").toLowerCase() !== "vampire") return;
+  const actorType = String(actor?.type ?? "").toLowerCase();
+  const supportedActor = actorType === "vampire"
+    || (actorType === "pc" && isVampireActor(actor));
+  if (!supportedActor) return;
   const headings = [...root.querySelectorAll(".sheet-headline, h1, h2, h3, h4")].filter(element => {
     const text = String(element.textContent ?? "").replace(/\s+/g, " ").trim();
     return /^(здоровье|health)$/i.test(text);
   });
 
-  // The legacy Vampire sheet renders the same health partial independently
-  // on Main and Combat. Correct every copy, including a currently hidden tab.
+  // Vampire and PC sheets may render the same health partial independently on
+  // Main and Combat. Correct every copy, including a currently hidden tab.
   for (const heading of headings) {
     const container = heading.nextElementSibling;
     const label = container?.querySelector?.(":scope > div") ?? container?.firstElementChild;
