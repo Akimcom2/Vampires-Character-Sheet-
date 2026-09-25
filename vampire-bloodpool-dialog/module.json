@@ -2,7 +2,7 @@
   "id": "vampire-bloodpool-dialog",
   "title": "Vampire: Blood Pool in Discipline Roll",
   "description": "Adds automatic Blood Pool spending to Vampire Discipline rolls for Vampire and universal PC actors, with Vampire sheet compatibility fixes.",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "authors": [
     {
       "name": "Codex for the Rostov World of Darkness campaign"

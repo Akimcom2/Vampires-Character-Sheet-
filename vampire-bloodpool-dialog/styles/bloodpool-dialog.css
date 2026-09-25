@@ -73,6 +73,11 @@
   font-size: 0.9em;
 }
 
+.vampire-blood-current.is-missing {
+  color: #ffb4a9;
+  font-weight: 700;
+}
+
 .vampire-blood-spend input,
 .vampire-blood-spend label,
 .vampire-blood-spend span {

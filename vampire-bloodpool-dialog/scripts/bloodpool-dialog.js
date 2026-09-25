@@ -98,7 +98,9 @@ function isVampireActor(actor) {
 }
 
 function validVampireActor(candidate) {
-  return candidate?.documentName === "Actor" && isVampireActor(candidate) && bloodData(candidate);
+  // Resolve Vampire PCs even when their Blood Pool advantage has not yet
+  // been added. Without this, the roll dialog cannot show the setup warning.
+  return candidate?.documentName === "Actor" && isVampireActor(candidate);
 }
 
 function isVampirePowerDialog(app, root = null) {
@@ -487,7 +489,6 @@ function isVampirePowerRoll(app, root, actor) {
   // and PC Discipline markers together identify this as a Vampire character;
   // limiting the fallback to power dialogs keeps ordinary PC rolls untouched.
   const isVampirePC = String(actor?.type ?? "").toLowerCase() === "pc"
-    && Boolean(bloodData(actor))
     && hasVampireDisciplines(actor);
   const hasGenericPowerType = objectTypes.includes("wod.types.power")
     || String(embeddedItem?.type ?? "").toLowerCase() === "power";
@@ -497,7 +498,7 @@ function isVampirePowerRoll(app, root, actor) {
 }
 
 function isDisciplineRoll(app, root, actor) {
-  if (!actor || !bloodData(actor)) return false;
+  if (!actor) return false;
   const hasDescription = hasSectionHeading(root, /^(описание|description)$/i);
   const hasSystem = hasSectionHeading(root, /^(система|system)$/i);
   if (!hasDescription || !hasSystem) return false;
@@ -563,6 +564,7 @@ function selectedDifficulty(root) {
 }
 
 function insertControls(root, willpower, current, defaultCost = 1) {
+  const hasResource = Number.isFinite(current);
   const row = document.createElement("div");
   row.className = "vampire-blood-spend";
   row.innerHTML = `
@@ -572,9 +574,9 @@ function insertControls(root, willpower, current, defaultCost = 1) {
     </div>
     <label class="vampire-blood-cost">
       <span>Стоимость</span>
-      <input type="number" data-blood-cost value="${defaultCost}" min="1" max="${Math.max(1, current, defaultCost)}" step="1">
+      <input type="number" data-blood-cost value="${defaultCost}" min="1" max="${Math.max(1, current ?? 0, defaultCost)}" step="1">
     </label>
-    <span class="vampire-blood-current" title="Текущий Запас крови">Доступно: ${current}</span>
+    <span class="vampire-blood-current${hasResource ? "" : " is-missing"}" title="Текущий Запас крови">${hasResource ? `Доступно: ${current}` : "Запас крови не настроен"}</span>
   `;
 
   const difficulty = difficultyContainer(root);
@@ -647,10 +649,10 @@ function enhance(app, html) {
   const willpower = willpowerCheckbox(root);
   const button = rollButton(root);
   const resource = actor && bloodData(actor);
-  if (!willpower || !button || !resource) return;
+  if (!willpower || !button) return;
 
   const defaultCost = bloodCostFromText(disciplineText(app, root));
-  const { row, toggle, cost } = insertControls(root, willpower, resource.value, defaultCost);
+  const { row, toggle, cost } = insertControls(root, willpower, resource?.value ?? null, defaultCost);
 
   requestAnimationFrame(() => {
     try {
@@ -665,6 +667,12 @@ function enhance(app, html) {
 
     event.preventDefault();
     event.stopImmediatePropagation();
+
+    if (!bloodData(actor)) {
+      return ui.notifications.error(
+        "У этого PC не настроен Запас крови. Добавьте преимущество Blood Pool / Запас крови в карточку; кровь не списана и бросок не выполнен."
+      );
+    }
 
     // WoD20 represents "Dont Show" as difficulty -1 and aborts in its own
     // handler. Validate first so an aborted roll can never consume Blood.
