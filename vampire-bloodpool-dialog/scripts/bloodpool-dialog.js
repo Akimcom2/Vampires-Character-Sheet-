@@ -16,6 +16,27 @@ const VAMPIRE_POWER_TYPES = new Set([
   "wod.types.combination",
   "wod.types.ritual"
 ]);
+const OTHER_SPLAT_POWER_TYPES = new Set([
+  "wod.types.art",
+  "wod.types.artpower",
+  "wod.types.arcanoi",
+  "wod.types.arcanoipower",
+  "wod.types.gift",
+  "wod.types.rite",
+  "wod.types.charm",
+  "wod.types.edge",
+  "wod.types.edgepower",
+  "wod.types.lore",
+  "wod.types.lorepower",
+  "wod.types.hekau",
+  "wod.types.hekaupower",
+  "wod.types.numina",
+  "wod.types.numinapower",
+  "wod.types.horror",
+  "wod.types.stain",
+  "wod.types.exaltedcharm",
+  "wod.types.exaltedsorcery"
+]);
 
 function elementFrom(html) {
   if (html instanceof HTMLElement) return html;
@@ -54,17 +75,24 @@ function bloodData(actor) {
   return null;
 }
 
+function hasVampireDisciplines(actor) {
+  return actor?.system?.settings?.hasdisciplines === true
+    || actor?.system?.settings?.powers?.hasdisciplines === true
+    || Array.from(actor?.items ?? []).some(item =>
+      ["wod.types.discipline", "wod.types.disciplinepower", "wod.types.combination"]
+        .includes(String(item?.system?.type ?? "").toLowerCase())
+    );
+}
+
 function isVampireActor(actor) {
   if (!actor) return false;
   const actorType = String(actor.type ?? "").toLowerCase();
   if (actorType === "vampire") return true;
   if (actorType !== "pc") return false;
 
-  // WoD20's universal PC sheet can represent any game line. Treat it as a
-  // Vampire only when its Discipline section is enabled or it actually owns
-  // Vampire Discipline items.
-  if (actor.system?.settings?.powers?.hasdisciplines === true) return true;
-  return Array.from(actor.items ?? []).some(item =>
+  // The base PC sheet derives this flag separately from its nested power
+  // settings. Keep both paths for different WoD20 versions.
+  return hasVampireDisciplines(actor) || Array.from(actor.items ?? []).some(item =>
     VAMPIRE_POWER_TYPES.has(String(item?.system?.type ?? "").toLowerCase())
   );
 }
@@ -86,6 +114,22 @@ function isVampirePowerDialog(app, root = null) {
     root?.matches?.(".vampireDialog, .vampiredialog")
     || root?.querySelector?.("form.vampireDialog, form.vampiredialog")
     || root?.closest?.(".vampireDialog, .vampiredialog")
+  );
+}
+
+function isPowerRollDialog(app, root = null) {
+  const sheetTypes = [
+    app?.object?.sheettype,
+    app?.item?.sheettype,
+    app?.document?.sheettype,
+    app?.options?.sheettype
+  ].map(value => String(value ?? "").toLowerCase());
+  if (sheetTypes.some(type => ["vampiredialog", "creaturedialog"].includes(type))) return true;
+
+  return Boolean(
+    root?.matches?.(".power-dialog")
+    || root?.querySelector?.("form.power-dialog")
+    || root?.closest?.(".power-dialog")
   );
 }
 
@@ -427,13 +471,29 @@ function isVampirePowerRoll(app, root, actor) {
     app?.document?.system?.type
   ].map(type => String(type ?? "").toLowerCase());
   if (objectTypes.some(type => VAMPIRE_POWER_TYPES.has(type))) return true;
+  if (objectTypes.some(type => OTHER_SPLAT_POWER_TYPES.has(type))) return false;
 
-  const itemId = app?.object?._id ?? app?.item?.id ?? app?.document?.id;
+  const itemId = app?.object?._id ?? app?.object?.id ?? app?.item?._id ?? app?.item?.id ?? app?.document?._id ?? app?.document?.id;
   const embeddedItem = itemId ? actor?.items?.get?.(itemId) : null;
   const embeddedType = String(embeddedItem?.system?.type ?? "").toLowerCase();
   if (VAMPIRE_POWER_TYPES.has(embeddedType)) return true;
+  if (OTHER_SPLAT_POWER_TYPES.has(embeddedType)) return false;
 
-  return isVampirePowerDialog(app, root);
+  if (isVampirePowerDialog(app, root)) return true;
+
+  // Some PC sheets turn a transferred Vampire Discipline into a generic
+  // WoD20 Power item. Such an item opens creatureDialog instead of
+  // vampireDialog, so the earlier exact-type checks miss it. The Blood Pool
+  // and PC Discipline markers together identify this as a Vampire character;
+  // limiting the fallback to power dialogs keeps ordinary PC rolls untouched.
+  const isVampirePC = String(actor?.type ?? "").toLowerCase() === "pc"
+    && Boolean(bloodData(actor))
+    && hasVampireDisciplines(actor);
+  const hasGenericPowerType = objectTypes.includes("wod.types.power")
+    || String(embeddedItem?.type ?? "").toLowerCase() === "power";
+  return isVampirePC
+    && isPowerRollDialog(app, root)
+    && (hasGenericPowerType || !objectTypes.some(Boolean));
 }
 
 function isDisciplineRoll(app, root, actor) {
