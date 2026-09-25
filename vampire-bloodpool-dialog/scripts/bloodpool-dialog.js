@@ -73,6 +73,22 @@ function validVampireActor(candidate) {
   return candidate?.documentName === "Actor" && isVampireActor(candidate) && bloodData(candidate);
 }
 
+function isVampirePowerDialog(app, root = null) {
+  const sheetTypes = [
+    app?.object?.sheettype,
+    app?.item?.sheettype,
+    app?.document?.sheettype,
+    app?.options?.sheettype
+  ].map(value => String(value ?? "").toLowerCase());
+  if (sheetTypes.includes("vampiredialog")) return true;
+
+  return Boolean(
+    root?.matches?.(".vampireDialog, .vampiredialog")
+    || root?.querySelector?.("form.vampireDialog, form.vampiredialog")
+    || root?.closest?.(".vampireDialog, .vampiredialog")
+  );
+}
+
 function actorFrom(app, root = null) {
   // Different WoD20/Foundry combinations expose the owner of a rolled Item in
   // different places. Follow the known parent/actor/document links instead of
@@ -94,12 +110,23 @@ function actorFrom(app, root = null) {
   ];
   const queue = seeds.filter(Boolean);
   const visited = new Set();
+  const vampirePowerDialog = isVampirePowerDialog(app, root);
 
   while (queue.length) {
     const candidate = queue.shift();
     if (!candidate || visited.has(candidate)) continue;
     visited.add(candidate);
     if (validVampireActor(candidate)) return candidate;
+
+    // WoD20's DialogPower uses this explicit sheet type for Discipline rolls.
+    // A transferred Discipline on a universal PC can lack the Vampire flags
+    // used by isVampireActor(), even though this dialog is unambiguously a
+    // Vampire power roll. Trust its direct actor reference when it has blood.
+    const actorType = String(candidate?.type ?? "").toLowerCase();
+    if (vampirePowerDialog
+      && candidate?.documentName === "Actor"
+      && ["pc", "vampire"].includes(actorType)
+      && bloodData(candidate)) return candidate;
 
     for (const linked of [
       candidate.actor,
@@ -406,12 +433,7 @@ function isVampirePowerRoll(app, root, actor) {
   const embeddedType = String(embeddedItem?.system?.type ?? "").toLowerCase();
   if (VAMPIRE_POWER_TYPES.has(embeddedType)) return true;
 
-  const sheetType = String(app?.object?.sheettype ?? app?.options?.sheettype ?? "").toLowerCase();
-  if (sheetType === "vampiredialog") return true;
-
-  return root.matches?.(".vampireDialog, .vampiredialog")
-    || Boolean(root.querySelector?.("form.vampireDialog, form.vampiredialog"))
-    || Boolean(root.closest?.(".vampireDialog, .vampiredialog"));
+  return isVampirePowerDialog(app, root);
 }
 
 function isDisciplineRoll(app, root, actor) {
