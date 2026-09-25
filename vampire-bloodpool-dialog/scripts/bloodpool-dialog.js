@@ -391,8 +391,15 @@ function hasSectionHeading(root, pattern) {
 }
 
 function isVampirePowerRoll(app, root, actor) {
-  const objectType = String(app?.object?.type ?? app?.item?.system?.type ?? "").toLowerCase();
-  if (VAMPIRE_POWER_TYPES.has(objectType)) return true;
+  const objectTypes = [
+    app?.object?.type,
+    app?.object?.system?.type,
+    app?.item?.type,
+    app?.item?.system?.type,
+    app?.document?.type,
+    app?.document?.system?.type
+  ].map(type => String(type ?? "").toLowerCase());
+  if (objectTypes.some(type => VAMPIRE_POWER_TYPES.has(type))) return true;
 
   const itemId = app?.object?._id ?? app?.item?.id ?? app?.document?.id;
   const embeddedItem = itemId ? actor?.items?.get?.(itemId) : null;
